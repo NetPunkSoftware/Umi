@@ -1,0 +1,414 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index 5f6d118..2f2d9e9 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -37,8 +37,8 @@ set(CORE_SOURCES
+     traits/shared_function.hpp
+     traits/tuple.hpp
+     traits/without_duplicates.hpp
+-    updater/executor_registry.hpp
+     updater/executor.hpp
++    updater/tasks_manager.hpp
+     updater/updater.hpp
+     updater/updater_all_async.hpp
+     updater/updater_batched.hpp
+diff --git a/src/containers/pooled_static_vector.hpp b/src/containers/pooled_static_vector.hpp
+index 1b97d30..5b918e2 100644
+--- a/src/containers/pooled_static_vector.hpp
++++ b/src/containers/pooled_static_vector.hpp
+@@ -9,8 +9,10 @@
+ #include <vector>
+ 
+ #include <boost/pool/pool.hpp>
+-#include <boost/range/adaptors.hpp>
+-#include <boost/range/join.hpp>
++
++#include <range/v3/view/concat.hpp>
++#include <range/v3/view/slice.hpp>
++#include <range/v3/view/transform.hpp>
+ 
+ #include <tao/tuple/tuple.hpp>
+ 
+@@ -44,11 +46,13 @@ public:
+     
+     inline auto range()
+     {
+-        return boost::join(
+-            boost::adaptors::transform(
+-                boost::adaptors::slice(_objects, 0, static_cast<std::size_t>(_current - &_objects[0])),
+-                [](T& obj) { return &obj; }), 
+-            _extra);
++        return ranges::views::concat(
++            ranges::views::transform(
++                ranges::views::slice(_objects, static_cast<uint16_t>(0), static_cast<std::size_t>(_current - &_objects[0])),
++                [this](T& obj) { return &obj; }
++            ),
++            _extra
++        );
+     }
+ 
+ protected:
+diff --git a/src/containers/thread_local_tasks.cpp b/src/containers/thread_local_tasks.cpp
+index 3be9f2d..d98d26c 100644
+--- a/src/containers/thread_local_tasks.cpp
++++ b/src/containers/thread_local_tasks.cpp
+@@ -1,17 +1,17 @@
+ #include "containers/thread_local_tasks.hpp"
+-#include "updater/executor_registry.hpp"
++#include "updater/tasks_manager.hpp"
+ 
+ #include <mutex>
+ 
+ 
+-tasks::tasks(executor_registry* executor, uint16_t max_size) noexcept :
++tasks::tasks(tasks_manager* manager, uint16_t max_size) noexcept :
+     _max_size(max_size),
+     _write_head(0),
+     _end(0),
+     _begin(0)
+ {
+     _container = new task_t[max_size];
+-    executor->register_tasks(this);
++    manager->register_tasks(this);
+ }
+ 
+ void tasks::execute() noexcept
+diff --git a/src/containers/thread_local_tasks.hpp b/src/containers/thread_local_tasks.hpp
+index f266c22..05b5b95 100644
+--- a/src/containers/thread_local_tasks.hpp
++++ b/src/containers/thread_local_tasks.hpp
+@@ -10,7 +10,7 @@
+ #include <vector>
+ 
+ 
+-class executor_registry;
++class tasks_manager;
+ 
+ 
+ class tasks
+@@ -19,7 +19,7 @@ public:
+     using task_t = fu2::unique_function<void()>;
+ 
+ public:
+-    tasks(executor_registry* executor, uint16_t max_size) noexcept;
++    tasks(tasks_manager* manager, uint16_t max_size) noexcept;
+ 
+     template <typename T>
+     void schedule(T&& task) noexcept;
+diff --git a/src/updater/executor.hpp b/src/updater/executor.hpp
+index eefd548..1d1e8df 100644
+--- a/src/updater/executor.hpp
++++ b/src/updater/executor.hpp
+@@ -3,7 +3,7 @@
+ #include "common/tao.hpp"
+ #include "ids/generator.hpp"
+ #include "traits/shared_function.hpp"
+-#include "updater/executor_registry.hpp"
++#include "updater/tasks_manager.hpp"
+ #include "updater/updater.hpp"
+ 
+ #include <boost/fiber/fiber.hpp>
+@@ -25,22 +25,20 @@ concept has_on_worker_thread = requires() {
+ };
+ 
+ template <typename D>
+-class base_executor : public executor_registry
++class base_executor : public tasks_manager
+ {
++private:
++    static inline base_executor<D>* _instance = nullptr;
++
+ public:
+     base_executor() noexcept
+     {
+-        instances[0] = this; // First entry always point to the last executor created
+-    }
+-
+-    static inline base_executor* last()
+-    {
+-        return (base_executor*)executor_registry::last();
++        _instance = this;
+     }
+ 
+-    static inline base_executor* current()
++    static inline base_executor* instance()
+     {
+-        return (base_executor*)executor_registry::current();
++        return _instance;
+     }
+ 
+     void start(uint8_t num_workers, bool suspend) noexcept
+@@ -81,66 +79,34 @@ public:
+         }
+     }
+ 
+-    void execute_tasks() noexcept
+-    {
+-        push_instance();
+-
+-        for (auto ts : _tasks)
+-        {
+-            ts->execute();
+-        }
+-
+-        // TODO(gpascualg): Do we need to reenable async_tasks?
+-        //for (auto ts : _async_tasks)
+-        //{
+-        //    ts->execute();
+-        //}
+-
+-        pop_instance();
+-    }
+-
+     template <typename U, typename... Args>
+     constexpr void update(U& updater, Args&&... args) noexcept
+     {
+-        push_instance();
+-
+         boost::fibers::fiber([&updater, ...args{ std::forward<Args>(args) }]() mutable {
+             updater.update(std::forward<Args>(args)...);
+             updater.wait_update();
+         }).join();
+-
+-        pop_instance();
+     }
+ 
+     template <typename U, typename... Args>
+     constexpr void update_no_wait(U& updater, Args&&... args) noexcept
+     {
+-        push_instance();
+-
+         boost::fibers::fiber([&updater, ...args{ std::forward<Args>(args) }]() mutable {
+             updater.update(std::forward<Args>(args)...);
+         }).join();
+-
+-        pop_instance();
+     }
+ 
+     template <typename U, typename... Args>
+     constexpr void wait_update(U& updater, Args&&... args) noexcept
+     {
+-        push_instance();
+-
+         boost::fibers::fiber([&updater, ...args{ std::forward<Args>(args) }]() mutable {
+             updater.wait_update();
+         }).join();
+-
+-        pop_instance();
+     }
+ 
+     template <typename... U, typename... Args>
+     constexpr void update_many(tao::tuple<Args...>&& args, U&... updaters) noexcept
+     {
+-        push_instance();
+-
+         boost::fibers::fiber([... updaters{ &updaters }, args{ std::forward<tao::tuple<Args...>>(args) }]() mutable {
+             tao::apply([&](auto&&... args) {
+                 ((updaters->update(std::forward<decltype(args)>(args)...)), ...);
+@@ -148,16 +114,12 @@ public:
+             
+             (updaters->wait_update(), ...);
+         }).join();
+-
+-        pop_instance();
+     }
+ 
+     template <typename U, typename... Args>
+     constexpr void sync(U& updater, Args&&... args) noexcept
+     {
+-        push_instance();
+         updater.sync(std::forward<Args>(args)...);
+-        pop_instance();
+     }
+ 
+     template <template <typename...> typename S, typename... A, typename... vecs>
+diff --git a/src/updater/executor_registry.hpp b/src/updater/tasks_manager.hpp
+similarity index 58%
+rename from src/updater/executor_registry.hpp
+rename to src/updater/tasks_manager.hpp
+index a3ad245..8f7d4cf 100644
+--- a/src/updater/executor_registry.hpp
++++ b/src/updater/tasks_manager.hpp
+@@ -7,34 +7,17 @@
+ #include <boost/fiber/fiber.hpp>
+ 
+ #include <array>
++#include <atomic>
+ #include <vector>
+ 
+ 
+ class tasks;
+-class async_tasks;
+ 
+-class executor_registry
++class tasks_manager
+ {
+     friend class tasks;
+-    friend class async_tasks;
+ 
+ public:
+-    static inline std::array<executor_registry*, 128> instances;
+-
+-private:
+-    static inline executor_registry** _current = &instances[0];
+-
+-public:
+-    static inline executor_registry* last() noexcept
+-    {
+-        return instances[0];
+-    }
+-
+-    static inline executor_registry* current() noexcept
+-    {
+-        return *_current;
+-    }
+-
+     template <typename C>
+     constexpr void schedule(C&& callback) noexcept
+     {
+@@ -44,7 +27,7 @@ public:
+     template <typename C, typename... Args>
+     constexpr void schedule_if(C&& callback, Args&&... tickets) noexcept
+     {
+-        schedule([callback = std::move(callback), tickets...]() {
++        schedule([callback = std::move(callback), tickets...]() mutable {
+             if ((tickets->valid() && ...))
+             {
+                 callback(tickets->get()->derived()...);
+@@ -52,42 +35,30 @@ public:
+         });
+     }
+ 
+-protected:
+-    inline void push_instance() noexcept
+-    {
+-        ++_current;
+-        *_current = this;
+-    }
+-
+-    inline void pop_instance() noexcept
+-    {
+-        --_current;
+-    }
+-
+     inline tasks& get_scheduler() noexcept
+     {
+         thread_local tasks ts(this, 2048);
+         return ts;
+     }
+ 
+-private:
+-    inline void register_tasks(tasks* ts) noexcept
++protected:
++    void execute_tasks() noexcept
+     {
+-        _mutex.lock();
+-        _tasks.push_back(ts);
+-        _mutex.unlock();
++        for (auto ts : tasks_manager::_tasks)
++        {
++            ts->execute();
++        }
+     }
+ 
+-    inline void register_tasks(async_tasks* ts) noexcept
++private:
++    inline void register_tasks(tasks* ts) noexcept
+     {
+         _mutex.lock();
+-        _async_tasks.push_back(ts);
++        _tasks.push_back(ts);
+         _mutex.unlock();
+     }
+ 
+ protected:
+-    // Tasks registry
+     boost::fibers::mutex _mutex;
+     std::vector<tasks*> _tasks;
+-    std::vector<async_tasks*> _async_tasks;
+ };
+diff --git a/src/view/view.hpp b/src/view/view.hpp
+index 5cbd32c..fe8a3a4 100644
+--- a/src/view/view.hpp
++++ b/src/view/view.hpp
+@@ -2,37 +2,60 @@
+ 
+ #include <boost/range.hpp>
+ #include <boost/range/combine.hpp>
++#include <range/v3/view/zip.hpp>
++#include <tao/tuple/tuple.hpp>
+ 
+ #include <tuple>
+ 
+ 
+-template <typename C, typename It, typename... Its>
+-inline constexpr void zip_i(C&& callback, It it, It end, Its&&... its)
++template <typename... types>
++struct view
+ {
+-    if (it != end)
+-    {
+-        callback(*it, *its...);
+-        zip_i(std::forward<C>(callback), ++it, end, ++its...);
++    template <typename S, typename C>
++    inline constexpr void operator()(S& scheme, C&& callback)
++    {    
++        for (auto combined : ::ranges::views::zip(scheme.template get<types>().range()...))
++        {
++            std::apply(callback, combined);
++        }
+     }
+-}
++};
++
+ 
+-template <typename C, typename Range, typename... Ranges>
+-inline constexpr void zip(C&& callback, Range r, Ranges&&... rs)
++template <typename S, typename C>
++struct view_spec
+ {
+-    zip_i(std::forward<C>(callback), begin(r), end(r), begin(rs)...);
+-}
++    using scheme = S;
++    using component = C;
++
++    view_spec(S& s) : _s(s)
++    {}
++
++    S& _s;
++};
+ 
+ template <typename... types>
+-struct view
++struct multi_view
++{
++    template <typename C>
++    inline constexpr void operator()(types... s, C&& callback)
++    {    
++        for (auto combined : ::ranges::views::zip(s._s.template get<typename types::component>().range()...))
++        {
++            std::apply(callback, combined);
++        }
++    }
++};
++
++template <typename T, typename... types>
++struct entity_view
+ {
+     template <typename S, typename C>
+     inline constexpr void operator()(S& scheme, C&& callback)
+-    {
+-        zip(std::forward<C>(callback), scheme.template get<types>().range()...);
+-        // for (auto combined : boost::range::combine(scheme.template get<types>().range()...))
+-        // {
+-        //     std::apply(callback, combined);
+-        // }
++    {    
++        for (auto component : scheme.template get<T>().range())
++        {
++            tao::apply(callback, tao::tuple(component, scheme.template get<types>().get_derived_or_null(component->id())...));
++        }
+     }
+ };
+-
+
