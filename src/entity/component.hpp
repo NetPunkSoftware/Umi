@@ -2,7 +2,6 @@
 
 #include "common/types.hpp"
 #include "storage/pool_item.hpp"
-#include "entity/components_map.hpp"
 #include "entity/scheme.hpp"
 #include "storage/storage.hpp"
 
@@ -11,6 +10,9 @@
 #include "concepts/entity_destroyable.hpp"
 #include "concepts/has_scheme_created.hpp"
 #include "concepts/has_scheme_information.hpp"
+
+
+class components_map;
 
 
 template <typename T>

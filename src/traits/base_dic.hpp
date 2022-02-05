@@ -48,12 +48,20 @@ inline constexpr const auto& orchestrator_type_impl()
         std::is_same_v<Candidate, typename InCar::base_t> ||            // Provided type is the base component<X> type
         std::is_same_v<Candidate, typename InCar::derived_t>)           // Provided type is the derived X type
     {
+#ifdef _MSC_VER
+        return InCar::orchestrator_t();
+#else
         return std::declval<typename InCar::orchestrator_t>();
+#endif
     }
     else if constexpr (sizeof...(InCdr) == 0)
     {
         //static_assert(false, "Provided type is not a storage type");
+#ifdef _MSC_VER
+        return InCar();
+#else
         return std::declval<InCar>();
+#endif
     }
     else
     {

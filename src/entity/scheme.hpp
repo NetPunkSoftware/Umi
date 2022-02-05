@@ -1,5 +1,7 @@
 #pragma once
 
+#include "common/tao.hpp"
+#include "entity/components_map.hpp"
 #include "storage/storage.hpp"
 #include "traits/base_dic.hpp"
 #include "traits/has_type.hpp"
@@ -118,6 +120,11 @@ struct entity_tuple : public tao::tuple<comps...>
         return static_cast<tao::tuple<comps...>&>(*this);
     }
 
+    inline constexpr uint64_t id() const noexcept
+    {
+        return tao::get<0>(downcast())->id();
+    }
+
     template <typename T>
     inline constexpr auto get() noexcept
     {
@@ -178,12 +185,12 @@ public:
     }
 
     template <typename T>
-    constexpr inline T* get(entity_id_t id) const noexcept
+    constexpr inline T* get(uint64_t id) const noexcept
     {
         return get<T>().get(id)->derived();
     }
 
-    constexpr inline auto search(entity_id_t id) const noexcept -> entity_tuple_t
+    constexpr inline auto search(uint64_t id) const noexcept -> entity_tuple_t
     {
         return entity_tuple_t(get<comps>().get(id)...);
     }
