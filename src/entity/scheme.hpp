@@ -391,13 +391,15 @@ private:
     template <typename T, typename tuple, std::size_t... I>
     constexpr inline auto move_proxy(scheme<comps...>& to, T* object, std::index_sequence<I...>)
     {
-        return move_impl(to, object, object->template get<std::tuple_element_t<I, tuple>>()...);
+        auto temp_tuple = std::tuple_cat(std::make_tuple(object), std::make_tuple(object->template get<std::tuple_element_t<I, tuple>>()...));
+        return move_impl(to, std::get<typename comps::derived_t*>(temp_tuple)...);
     }
 
     template <typename T, typename tuple, std::size_t... I>
     constexpr inline auto change_partition_proxy(bool p, T* object, std::index_sequence<I...>)
     {
-        return change_partition_impl(p, object, object->template get<std::tuple_element_t<I, tuple>>()...);
+        auto temp_tuple = std::tuple_cat(std::make_tuple(object), std::make_tuple(object->template get<std::tuple_element_t<I, tuple>>()...));
+        return change_partition_impl(p, std::get<typename comps::derived_t*>(temp_tuple)...);
     }
 
     template <typename... Args>
@@ -418,7 +420,7 @@ private:
 
         return tao::apply([this](auto... entities) mutable {
             (entities->base()->base_scheme_information(*this), ...);
-            return entity_tuple_t(entities...);
+            return make_entity_tuple(entities...);
         }, tao::tuple(get<comps>().move(to.get<comps>(), entities)...));
     }
 

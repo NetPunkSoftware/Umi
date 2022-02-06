@@ -45,8 +45,8 @@ template <uint32_t inplace_function_size>
 void task_manager<inplace_function_size>::execute() noexcept
 {
     auto fiber_pool = np::this_fiber::fiber_pool();
-    auto*& per_thread_tasks = fiber_pool->template threadlocal_all<tasks>();
-    for (auto i = 0, size = fiber_pool->maximum_worker_id(); i < size; ++i)
+    auto& per_thread_tasks = fiber_pool->template threadlocal_all<tasks>();
+    for (uint8_t i = 0, size = fiber_pool->maximum_worker_id(); i < size; ++i)
     {
         for (auto&& task : per_thread_tasks[i])
         {
