@@ -36,7 +36,7 @@ void task_manager<inplace_function_size>::schedule_if(F&& function, Args&&... ti
     schedule([function = std::move(function), tickets...]() mutable {
         if ((tickets->valid() && ...))
         {
-            function(tickets->get()->derived()...);
+            function(tickets->get()...);
         }
     });
 }
