@@ -27,14 +27,19 @@ public:
     template <typename... Ts>
     components_map(const tao::tuple<Ts...>& components)
     {
-        tao::apply([this](auto... components) {
-            (..., _components.emplace(
-                type_hash<bare_t<decltype(components)>>(),
-                [ticket = components->ticket()]() {
-                    return reinterpret_cast<void*>(ticket->get()->derived());
-                })
-            );
-        }, components);
+        // MSVC has a hard time doing everything with std::apply inside here
+        emplace_components(tao::get<Ts>(components)...);
+    }
+
+    template <typename... Comps>
+    inline void emplace_components(Comps&&... comps) noexcept
+    {
+        (..., _components.emplace(
+            type_hash<bare_t<decltype(comps)>>(),
+                [ticket = comps->ticket()]() {
+                return reinterpret_cast<void*>(ticket->get());
+            })
+        );
     }
 
     template <typename T>
