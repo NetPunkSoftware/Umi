@@ -26,13 +26,11 @@ public:
 
     inline auto get() const
     {
-        assert(valid() && "Using an invalid ticket");
         return _ptr->derived();
     }
     
     inline auto operator->() const
     {
-        assert(valid() && "Using an invalid ticket");
         return _ptr->derived();
     }
 
