@@ -18,6 +18,7 @@ class components_map;
 template <typename T>
 class component : public pool_item<component<T>>
 {
+    // Friend with scheme
     template <typename... vectors> friend struct scheme;
     friend class scheme_entities_map;
 
@@ -30,6 +31,11 @@ class component : public pool_item<component<T>>
 
 public:
     using derived_t = T;
+
+    // Define noexcept defaults
+    component() noexcept = default;
+    component(component&&) noexcept = default;
+    component& operator=(component&&) noexcept = default;
 
 public:
     inline entity_id_t id() const noexcept
@@ -54,30 +60,30 @@ public:
         _components->template push<D>(component);
     }
 
-    inline component<derived_t>* base()
+    inline component<derived_t>* base() noexcept
     {
         return this;
     }
 
-    inline derived_t* derived()
+    inline derived_t* derived() noexcept
     {
         return reinterpret_cast<derived_t*> (this);
     }
 
 private:
     template <typename... Args>
-    constexpr inline void base_construct(entity_id_t id, Args&&... args);
+    constexpr inline void base_construct(entity_id_t id, Args&&... args) noexcept;
 
     template <typename... Args>
-    constexpr inline void base_entity_destroy(Args... args);
+    constexpr inline void base_entity_destroy(Args... args) noexcept;
 
     template <typename... Args>
-    constexpr inline void base_destroy(Args&&... args);
+    constexpr inline void base_destroy(Args&&... args) noexcept;
 
-    constexpr inline void base_scheme_created(const std::shared_ptr<components_map>& map);
+    constexpr inline void base_scheme_created(const std::shared_ptr<components_map>& map) noexcept;
 
     template <template <typename...> typename S, typename... comps>
-    constexpr inline void base_scheme_information(S<comps...>& scheme);
+    constexpr inline void base_scheme_information(S<comps...>& scheme) noexcept;
 
 protected:
     entity_id_t _id;
@@ -87,8 +93,13 @@ protected:
 
 template <typename derived_t>
 template <typename... Args>
-constexpr inline void component<derived_t>::base_construct(entity_id_t id, Args&&... args)
+constexpr inline void component<derived_t>::base_construct(entity_id_t id, Args&&... args) noexcept
 {
+    // TODO(gpascualg): Can't do traits with CRTP outside methods...
+    // Must be noexcept (move) constructable
+    static_assert(std::is_nothrow_constructible_v<derived_t>, "Components must be nothrow constructible");
+    static_assert(std::is_nothrow_move_constructible_v<derived_t>, "Components must be nothrow move constructible");
+
     _id = id;
 
 #if (__DEBUG__ || FORCE_ALL_CONSTRUCTORS) && !DISABLE_DEBUG_CONSTRUCTOR
@@ -104,7 +115,7 @@ constexpr inline void component<derived_t>::base_construct(entity_id_t id, Args&
 
 template <typename derived_t>
 template <typename... Args>
-constexpr inline void component<derived_t>::base_entity_destroy(Args... args)
+constexpr inline void component<derived_t>::base_entity_destroy(Args... args) noexcept
 {
     if constexpr (entity_destroyable_v<component<derived_t>, derived_t, Args...>)
     {
@@ -114,7 +125,7 @@ constexpr inline void component<derived_t>::base_entity_destroy(Args... args)
 
 template <typename derived_t>
 template <typename... Args>
-constexpr inline void component<derived_t>::base_destroy(Args&&... args)
+constexpr inline void component<derived_t>::base_destroy(Args&&... args) noexcept
 {
     if constexpr (destroyable_v<component<derived_t>, derived_t, Args...>)
     {
@@ -123,7 +134,7 @@ constexpr inline void component<derived_t>::base_destroy(Args&&... args)
 }
 
 template <typename derived_t>
-constexpr inline void component<derived_t>::base_scheme_created(const std::shared_ptr<components_map>& map)
+constexpr inline void component<derived_t>::base_scheme_created(const std::shared_ptr<components_map>& map) noexcept
 {
     _components = map;
 
@@ -135,7 +146,7 @@ constexpr inline void component<derived_t>::base_scheme_created(const std::share
 
 template <typename derived_t>
 template <template <typename...> typename S, typename... comps>
-constexpr inline void component<derived_t>::base_scheme_information(S<comps...>& scheme)
+constexpr inline void component<derived_t>::base_scheme_information(S<comps...>& scheme) noexcept
 {
     if constexpr (has_scheme_information_v<component<derived_t>, derived_t, S, comps...>)
     {
