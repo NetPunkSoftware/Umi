@@ -40,7 +40,7 @@ using remove_t = tuple_cat_t<
 
 
 template <typename Candidate, typename InCar, typename... InCdr>
-inline constexpr const auto& orchestrator_type_impl()
+inline constexpr auto orchestrator_type_impl()
 {
     if constexpr (
         std::is_same_v<Candidate, InCar> ||                             // Provided candidate is already an storage type
@@ -48,20 +48,12 @@ inline constexpr const auto& orchestrator_type_impl()
         std::is_same_v<Candidate, typename InCar::base_t> ||            // Provided type is the base component<X> type
         std::is_same_v<Candidate, typename InCar::derived_t>)           // Provided type is the derived X type
     {
-#ifdef _MSC_VER
-        return InCar::orchestrator_t();
-#else
-        return std::declval<typename InCar::orchestrator_t>();
-#endif
+        return typename InCar::orchestrator_t();
     }
     else if constexpr (sizeof...(InCdr) == 0)
     {
         //static_assert(false, "Provided type is not a storage type");
-#ifdef _MSC_VER
         return InCar();
-#else
-        return std::declval<InCar>();
-#endif
     }
     else
     {
