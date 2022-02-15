@@ -8,7 +8,7 @@
 #include "traits/contains.hpp"
 
 #include <inttypes.h>
-
+#include <unordered_map>
 
 template <typename D> class component;
 
