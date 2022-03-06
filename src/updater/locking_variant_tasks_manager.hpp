@@ -1,0 +1,90 @@
+
+#pragma once
+
+#include <pool/fiber_pool.hpp>
+#include <synchronization/mutex.hpp>
+#include "storage/ticket.hpp"
+
+#include <variant>
+#include <vector>
+
+
+template <typename... Ts>
+class locking_variant_task_manager
+{
+    class dual_vector_scheduler
+    {
+        using vector_t = std::vector<std::variant<Ts...>>;
+
+    public:
+        dual_vector_scheduler() noexcept :
+            _vector_1(),
+            _vector_2()
+        {
+            _current_vector = &_vector_1;
+        }
+
+        template <typename T>
+        inline void submit(T&& value) noexcept
+        {
+            _mutex.lock();
+            _current_vector->push_back(std::forward<T>(value));
+            _mutex.unlock();
+        }
+
+        inline vector_t& swap() noexcept
+        {
+            _mutex.lock();
+            vector_t* old = _current_vector;
+            if (_current_vector == &_vector_1)
+            {
+                _current_vector = &_vector_2;
+            }
+            else
+            {
+                _current_vector = &_vector_1;
+            }
+            _mutex.unlock();
+            return *old;
+        }
+
+    private:
+        np::mutex _mutex;
+        vector_t* _current_vector;
+        vector_t _vector_1;
+        vector_t _vector_2;
+    };
+
+public:
+    template <typename T>
+    void submit(T&& value) noexcept;
+
+    template <typename V>
+    void execute(V&& visitor) noexcept;
+};
+
+template <typename... Ts>
+template <typename T>
+void locking_variant_task_manager<Ts...>::submit(T&& value) noexcept
+{
+    auto& local_tasks = np::this_fiber::template threadlocal<dual_vector_scheduler>();
+    local_tasks.submit(std::forward<T>(value));
+}
+
+template <typename... Ts>
+template <typename V>
+void locking_variant_task_manager<Ts...>::execute(V&& visitor) noexcept
+{
+    auto fiber_pool = np::this_fiber::fiber_pool();
+    auto& per_thread_tasks = fiber_pool->template threadlocal_all<dual_vector_scheduler>();
+    for (uint8_t i = 0, size = fiber_pool->maximum_worker_id(); i < size; ++i)
+    {
+        auto& iter_safe_buffer = per_thread_tasks[i].swap();
+        for (auto&& variant : iter_safe_buffer)
+        {
+            std::visit(visitor, variant);
+        }
+
+        iter_safe_buffer.clear();
+    }
+}
