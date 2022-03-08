@@ -26,12 +26,20 @@ protected:
     void invalidate() noexcept;
 
 private:
+#ifndef UMI_DEFAULT_TICKETS_TO_NULLPTR
+    static inline auto _default_ticket = typename ::ticket<T>::ptr(new ::ticket<T>(nullptr));
+#endif
+
    typename ::ticket<T>::ptr _ticket;
 };
 
 template <typename T>
 pool_item<T>::pool_item() noexcept :
+#ifndef UMI_DEFAULT_TICKETS_TO_NULLPTR
+    _ticket(_default_ticket)
+#else 
     _ticket(nullptr)
+#endif
 {}
 
 template <typename T>
