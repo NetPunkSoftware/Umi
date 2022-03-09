@@ -37,6 +37,11 @@ public:
     component(component&&) noexcept = default;
     component& operator=(component&&) noexcept = default;
 
+    component(entity_id_t id) :
+        _id(id),
+        _components()
+    {}
+
 public:
     inline entity_id_t id() const noexcept
     {
